@@ -1,80 +1,71 @@
-# Node.js Express Web App to Linux on Azure
-# Build a Node.js Express app and deploy it to Azure as a Linux web app.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
-
+# Multi-stage pipeline: Build then deploy to Staging with approval
 trigger:
-- main
+  - main
 
 variables:
-
-  # Azure Resource Manager connection created during pipeline creation
+  # Paste your service connection ID from the old YAML
   azureSubscription: 'ac6967ed-2153-49a6-8fbb-01286db81b61'
-
-  # Web app name
+  # Your production app name from Step 3
   webAppName: 'deong-nodeapp'
-
-  # Environment name
-  environmentName: 'deong-nodeapp'
-
-  # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+  # Your new staging app name
+  stagingAppName: 'deong-nodeapp-staging'
 
 stages:
-- stage: Build
-  displayName: Build stage
-  jobs:
-  - job: Build
-    displayName: Build
-    pool:
-      vmImage: $(vmImageName)
-
-    steps:
-    - task: NodeTool@0
-      inputs:
-        versionSpec: '22.x'
-      displayName: 'Install Node.js'
-
-    - script: |
-        npm install
-        npm run build --if-present
-        npm run test --if-present
-      displayName: 'npm install, build and test'
-
-    - task: ArchiveFiles@2
-      displayName: 'Archive files'
-      inputs:
-        rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
-        includeRootFolder: false
-        archiveType: zip
-        archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
-        replaceExistingArchive: true
-
-    - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
-      artifact: drop
-
-- stage: Deploy
-  displayName: Deploy stage
-  dependsOn: Build
-  condition: succeeded()
-  jobs:
-  - deployment: Deploy
-    displayName: Deploy
-    environment: $(environmentName)
-    pool:
-      vmImage: $(vmImageName)
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: AzureWebApp@1
-            displayName: 'Azure Web App Deploy: deong-nodeapp'
+  # Stage 1: Build and test the application
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+      - job: BuildJob
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Install Node.js on the build agent
+          - task: UseNode@1
             inputs:
-              azureSubscription: $(azureSubscription)
-              appType: webAppLinux
-              appName: $(webAppName)
-              runtimeStack: 'NODE|22-lts'
-              package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip
-              startUpCommand: 'npm run start'
-              deploymentMethod: 'runFromPackage'
-              
+              version: '22.x'
+            displayName: 'Install Node.js'
+
+          # Install dependencies, build, and test
+          - script: |
+              npm install
+              npm run build --if-present
+              npm run test --if-present
+            displayName: 'npm install, build, and test'
+
+          # Package the app into a ZIP file
+          - task: ArchiveFiles@2
+            displayName: 'Archive files'
+            inputs:
+              rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+              replaceExistingArchive: true
+
+          # Publish the ZIP as a pipeline artifact
+          - upload: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+            artifact: drop
+
+  # Stage 2: Deploy to the staging environment (requires approval)
+  - stage: Staging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployToStaging
+        pool:
+          vmImage: 'ubuntu-latest'
+        # Targets the "staging" environment with the approval gate  
+        environment: 'staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Deploy the artifact to the staging App Service
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Staging App Service'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(stagingAppName)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
