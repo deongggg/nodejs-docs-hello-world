@@ -71,7 +71,7 @@ stages:
             displayName: 'Azure Web App Deploy: deong-nodeapp'
             inputs:
               azureSubscription: $(azureSubscription)
-              appType: functionAppLinux #webAppLinux
+              appType: webAppLinux #webAppLinux
               appName: $(webAppName)
               runtimeStack: 'NODE|20LTS'
               package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip
